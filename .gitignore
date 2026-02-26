@@ -1,0 +1,8 @@
+node_modules/
+.env
+cloudflare-tunnel.log
+*.log
+_fix*.js
+_check*.js
+_deploy*.js
+_verify*.js

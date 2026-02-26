@@ -1,0 +1,21 @@
+{
+  "name": "vultr-vm-creator",
+  "version": "1.0.0",
+  "description": "Vultr Windows VM Manager",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "archiver": "^7.0.1",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "ssh2": "^1.17.0",
+    "winrm-client": "^0.0.11"
+  }
+}
