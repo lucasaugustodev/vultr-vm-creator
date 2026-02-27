@@ -268,7 +268,7 @@ async function provisionWindows(connInfo, { adminPassword, onStep }) {
       $updateTaskName = 'ClaudeLauncherWebUpdate'
       $psExe = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'
       $updateScript = Join-Path $launcherDir 'update.ps1'
-      $updateAction = New-ScheduledTaskAction -Execute $psExe -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$updateScript`"" -WorkingDirectory $launcherDir
+      $updateAction = New-ScheduledTaskAction -Execute $psExe -Argument ('-NoProfile -ExecutionPolicy Bypass -File "' + $updateScript + '"') -WorkingDirectory $launcherDir
       $updateTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 10)
       $updateSettings = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 5)
       $updatePrincipal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
