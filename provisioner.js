@@ -34,7 +34,8 @@ try {
       reject(new Error(`PS Remote timeout (${timeoutMs/1000}s)`));
     }, timeoutMs);
 
-    execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
+    const psExe = process.platform === 'win32' ? 'powershell.exe' : 'pwsh';
+    execFile(psExe, ['-NoProfile', '-NonInteractive', '-Command', script], {
       timeout: timeoutMs,
       maxBuffer: 10 * 1024 * 1024,
     }, (err, stdout, stderr) => {
