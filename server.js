@@ -105,7 +105,7 @@ app.get('/api/options', async (req, res) => {
       windowsOS: osList.windows,
       linuxOS: osList.linux,
       regions,
-      launcherWebAvailable: fs.existsSync(path.join(LAUNCHER_WEB_DIR, 'server.js')),
+      launcherWebAvailable: true,
       tunnelAvailable: !!tunnelUrl,
     });
   } catch (err) {
@@ -146,11 +146,9 @@ app.post('/api/instances', async (req, res) => {
   const taskId = crypto.randomUUID();
 
   // Steps: create(1) + wait(1) + provision steps
-  // Windows provision: connect(1) + rdp(1) + git(1) + node(1) + path(1) + claude(1) + [launcherWeb(1)] + shortcuts(1) + password(1) = 8-9
+  // Windows provision: connect(1) + rdp(1) + git(1) + node(1) + path(1) + claude(1) + launcherWeb(1) + shortcuts(1) + password(1) = 9
   // Linux provision: connect(1) + git(1) + node(1) + claude(1) + launcherWeb(1) = 5
-  const hasLauncherWeb = fs.existsSync(path.join(LAUNCHER_WEB_DIR, 'server.js'));
-  let winSteps = 8; // base: connect + rdp + git + node + path + claude + shortcuts + password
-  if (hasLauncherWeb && tunnelUrl) winSteps++;
+  const winSteps = 9; // connect + rdp + git + node + path + claude + launcherWeb + shortcuts + password
   const linuxSteps = 5; // connect + git + node + claude + launcherWeb (always)
   const provSteps = isWindows ? (installClaude ? winSteps : 0) : linuxSteps;
   const stepsPerVm = 2 + provSteps;
@@ -239,10 +237,6 @@ app.post('/api/instances', async (req, res) => {
         if ((installClaude || !isWindows) && ready.ip && ready.ip !== '0.0.0.0') {
           stepNum++;
           const connectPassword = vultrPassword || adminPassword || 'VultrAdmin2026';
-          const currentTunnel = detectTunnelUrl();
-          const launcherWebUrl = (currentTunnel && fs.existsSync(path.join(LAUNCHER_WEB_DIR, 'server.js')))
-            ? `${currentTunnel}/download/launcher-web`
-            : null;
 
           emitToTask(taskId, 'progress', {
             step: stepNum, total: totalSteps,
@@ -257,7 +251,6 @@ app.post('/api/instances', async (req, res) => {
               password: connectPassword,
               isWindows,
               adminPassword: adminPassword || connectPassword,
-              launcherWebUrl,
               onStatus: (msg) => {
                 emitToTask(taskId, 'progress', {
                   step: stepNum, total: totalSteps,
@@ -306,7 +299,7 @@ app.post('/api/instances', async (req, res) => {
       const elapsed = Math.round((Date.now() - task.startedAt) / 1000);
 
       for (const send of task.listeners) {
-        send('complete', { instances: results, elapsed, installClaude: !!installClaude, isWindows, hasLauncherWeb: hasLauncherWeb && !!tunnelUrl });
+        send('complete', { instances: results, elapsed, installClaude: !!installClaude, isWindows, hasLauncherWeb: true });
       }
     } catch (err) {
       const task = tasks.get(taskId);

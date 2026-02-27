@@ -147,7 +147,7 @@ function sshExec(conn, command, timeoutMs = 300000) {
 // Provision Windows (via PowerShell Remoting)
 // ═══════════════════════════════════════════
 
-async function provisionWindows(connInfo, { adminPassword, launcherWebUrl, onStep }) {
+async function provisionWindows(connInfo, { adminPassword, onStep }) {
   const { host, password } = connInfo;
   const steps = [];
 
@@ -237,51 +237,54 @@ async function provisionWindows(connInfo, { adminPassword, launcherWebUrl, onSte
     timeout: 300000,
   });
 
-  // Step 6: Install Claude Launcher Web (download zip from provisioning server)
-  if (launcherWebUrl) {
-    steps.push({
-      label: 'Instalar Claude Launcher Web',
-      command: `
-        $env:Path = 'C:\\Program Files\\nodejs;C:\\Program Files\\Git\\cmd;C:\\Program Files\\Git\\bin;' + [System.Environment]::GetEnvironmentVariable('Path','Machine')
-        $launcherDir = 'C:\\claude-launcher-web'
-        if (Test-Path "$launcherDir\\server.js") { Write-Output 'Launcher Web already installed'; return }
+  // Step 6: Install Claude Launcher Web (clone from GitHub - git already installed)
+  steps.push({
+    label: 'Instalar Claude Launcher Web',
+    command: `
+      $env:Path = 'C:\\Program Files\\nodejs;C:\\Program Files\\Git\\cmd;C:\\Program Files\\Git\\bin;' + [System.Environment]::GetEnvironmentVariable('Path','Machine')
+      $launcherDir = 'C:\\claude-launcher-web'
+      if (Test-Path "$launcherDir\\server.js") { Write-Output 'Launcher Web already installed'; return }
 
-        Write-Output 'Downloading Claude Launcher Web...'
-        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-        $zipPath = 'C:\\claude-launcher-web.zip'
-        Invoke-WebRequest -Uri '${launcherWebUrl}' -OutFile $zipPath -UseBasicParsing
-        $size = [math]::Round((Get-Item $zipPath).Length / 1KB, 1)
-        Write-Output "Downloaded: $size KB"
+      Write-Output 'Cloning Claude Launcher Web from GitHub...'
+      & 'C:\\Program Files\\Git\\cmd\\git.exe' clone https://github.com/lucasaugustodev/claude-launcher-web.git $launcherDir 2>&1 | Select-Object -Last 3
 
-        Write-Output 'Extracting...'
-        Expand-Archive -Path $zipPath -DestinationPath 'C:\\' -Force
-        Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
+      if (-not (Test-Path "$launcherDir\\server.js")) { Write-Output 'ERROR: Clone failed'; return }
 
-        Write-Output 'Installing npm dependencies...'
-        Set-Location $launcherDir
-        & 'C:\\Program Files\\nodejs\\npm.cmd' install --production 2>&1 | Select-Object -Last 3
+      Write-Output 'Installing npm dependencies...'
+      Set-Location $launcherDir
+      & 'C:\\Program Files\\nodejs\\npm.cmd' install --production 2>&1 | Select-Object -Last 3
 
-        # Create scheduled task to auto-start on boot
-        $taskName = 'ClaudeLauncherWeb'
-        $nodeExe = 'C:\\Program Files\\nodejs\\node.exe'
-        $action = New-ScheduledTaskAction -Execute $nodeExe -Argument 'server.js' -WorkingDirectory $launcherDir
-        $trigger = New-ScheduledTaskTrigger -AtStartup
-        $settings = New-ScheduledTaskSettingsSet -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -StartWhenAvailable -DontStopIfGoingOnBatteries
-        $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
-        Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
-        Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal | Out-Null
+      # Create scheduled task to auto-start on boot
+      $taskName = 'ClaudeLauncherWeb'
+      $nodeExe = 'C:\\Program Files\\nodejs\\node.exe'
+      $action = New-ScheduledTaskAction -Execute $nodeExe -Argument 'server.js' -WorkingDirectory $launcherDir
+      $trigger = New-ScheduledTaskTrigger -AtStartup
+      $settings = New-ScheduledTaskSettingsSet -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -StartWhenAvailable -DontStopIfGoingOnBatteries
+      $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+      Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+      Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal | Out-Null
 
-        # Open firewall port 3001
-        New-NetFirewallRule -DisplayName 'Claude Launcher Web' -Direction Inbound -LocalPort 3001 -Protocol TCP -Action Allow -ErrorAction SilentlyContinue | Out-Null
+      # Create auto-update scheduled task (runs every 10 minutes)
+      $updateTaskName = 'ClaudeLauncherWebUpdate'
+      $psExe = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'
+      $updateScript = Join-Path $launcherDir 'update.ps1'
+      $updateAction = New-ScheduledTaskAction -Execute $psExe -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$updateScript`"" -WorkingDirectory $launcherDir
+      $updateTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 10)
+      $updateSettings = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 5)
+      $updatePrincipal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+      Unregister-ScheduledTask -TaskName $updateTaskName -Confirm:$false -ErrorAction SilentlyContinue
+      Register-ScheduledTask -TaskName $updateTaskName -Action $updateAction -Trigger $updateTrigger -Settings $updateSettings -Principal $updatePrincipal | Out-Null
 
-        # Start the task now
-        Start-ScheduledTask -TaskName $taskName
-        Start-Sleep -Seconds 3
-        Write-Output 'Claude Launcher Web installed and running on port 3001'
-      `,
-      timeout: 300000,
-    });
-  }
+      # Open firewall port 3001
+      New-NetFirewallRule -DisplayName 'Claude Launcher Web' -Direction Inbound -LocalPort 3001 -Protocol TCP -Action Allow -ErrorAction SilentlyContinue | Out-Null
+
+      # Start the service now
+      Start-ScheduledTask -TaskName $taskName
+      Start-Sleep -Seconds 3
+      Write-Output 'Claude Launcher Web installed with auto-update (every 10 min) on port 3001'
+    `,
+    timeout: 300000,
+  });
 
   // Step 8: Desktop shortcut
   steps.push({
@@ -336,7 +339,7 @@ async function provisionWindows(connInfo, { adminPassword, launcherWebUrl, onSte
 // Provision Linux (via SSH)
 // ═══════════════════════════════════════════
 
-async function provisionLinux(conn, { launcherWebUrl, adminPassword, onStep }) {
+async function provisionLinux(conn, { adminPassword, onStep }) {
   const steps = [
     {
       label: 'Instalar Git',
@@ -381,6 +384,9 @@ sudo -u claude npm install --production 2>&1 | tail -5
 # Install Claude Code globally for the claude user
 sudo -u claude npm install -g @anthropic-ai/claude-code 2>&1 | tail -3
 
+# Make update script executable
+chmod +x /opt/claude-launcher-web/update.sh
+
 # Create systemd service running as claude user
 cat > /etc/systemd/system/claude-launcher-web.service << EOSVC
 [Unit]
@@ -399,13 +405,39 @@ Environment=HOME=/home/claude
 [Install]
 WantedBy=multi-user.target
 EOSVC
+
+# Create systemd timer for auto-update (every 10 minutes)
+cat > /etc/systemd/system/claude-launcher-update.service << EOSVC
+[Unit]
+Description=Claude Launcher Web Auto-Update
+[Service]
+Type=oneshot
+User=claude
+Group=claude
+WorkingDirectory=/opt/claude-launcher-web
+ExecStart=/opt/claude-launcher-web/update.sh
+Environment=HOME=/home/claude
+EOSVC
+
+cat > /etc/systemd/system/claude-launcher-update.timer << EOSVC
+[Unit]
+Description=Auto-update Claude Launcher Web every 10 minutes
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=10min
+[Install]
+WantedBy=timers.target
+EOSVC
+
 systemctl daemon-reload
 systemctl enable claude-launcher-web
 systemctl start claude-launcher-web
+systemctl enable claude-launcher-update.timer
+systemctl start claude-launcher-update.timer
 # Open firewall
 ufw allow 3001/tcp 2>/dev/null || firewall-cmd --permanent --add-port=3001/tcp 2>/dev/null && firewall-cmd --reload 2>/dev/null || iptables -I INPUT -p tcp --dport 3001 -j ACCEPT 2>/dev/null || true
 sleep 2
-echo "Claude Launcher Web installed and running on port 3001 (as user claude)"
+echo "Claude Launcher Web installed with auto-update (every 10 min) on port 3001 (as user claude)"
 '`,
     timeout: 300000,
   });
@@ -435,7 +467,7 @@ echo "Claude Launcher Web installed and running on port 3001 (as user claude)"
 // Main provision function
 // ═══════════════════════════════════════════
 
-async function provision({ host, password, isWindows, adminPassword, launcherWebUrl, onStep, onStatus }) {
+async function provision({ host, password, isWindows, adminPassword, onStep, onStatus }) {
   if (isWindows) {
     if (onStatus) onStatus(`Conectando via WinRM (Negotiate) em ${host}...`);
 
@@ -448,7 +480,7 @@ async function provision({ host, password, isWindows, adminPassword, launcherWeb
     });
 
     if (onStatus) onStatus('WinRM conectado! Iniciando provisionamento...');
-    return await provisionWindows(connInfo, { adminPassword, launcherWebUrl, onStep });
+    return await provisionWindows(connInfo, { adminPassword, onStep });
   } else {
     if (onStatus) onStatus(`Conectando via SSH em ${host}...`);
 
@@ -456,7 +488,7 @@ async function provision({ host, password, isWindows, adminPassword, launcherWeb
 
     if (onStatus) onStatus('SSH conectado! Iniciando provisionamento...');
     try {
-      return await provisionLinux(conn, { launcherWebUrl, adminPassword, onStep });
+      return await provisionLinux(conn, { adminPassword, onStep });
     } finally {
       conn.end();
     }
