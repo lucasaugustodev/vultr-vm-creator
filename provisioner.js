@@ -355,35 +355,47 @@ async function provisionLinux(conn, { launcherWebUrl, adminPassword, onStep }) {
     },
   ];
 
-  // Install Claude Launcher Web on Linux
-  if (launcherWebUrl) {
-    steps.push({
-      label: 'Instalar Claude Launcher Web',
-      command: `bash -c '
+  // Always install Claude Launcher Web on Linux (clone from GitHub)
+  // Runs as dedicated 'claude' user so --dangerously-skip-permissions works (blocked as root)
+  steps.push({
+    label: 'Instalar Claude Launcher Web',
+    command: `bash -c '
 set -e
 if [ -f /opt/claude-launcher-web/server.js ]; then echo "Launcher Web already installed"; exit 0; fi
-echo "Downloading Claude Launcher Web..."
-cd /tmp && curl -fsSL -o claude-launcher-web.zip "${launcherWebUrl}"
-echo "Extracting..."
-apt-get install -y unzip 2>/dev/null || dnf install -y unzip 2>/dev/null || true
-unzip -o claude-launcher-web.zip -d /opt/ 2>/dev/null
-mv /opt/claude-launcher-web /opt/claude-launcher-web-tmp 2>/dev/null || true
-mv /opt/claude-launcher-web-tmp /opt/claude-launcher-web 2>/dev/null || true
-rm -f /tmp/claude-launcher-web.zip
+
+# Create dedicated claude user (non-root so bypass mode works)
+if ! id claude &>/dev/null; then
+  useradd -m -s /bin/bash claude
+  echo "claude ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/claude
+  chmod 440 /etc/sudoers.d/claude
+  echo "User claude created with sudo for package installs"
+fi
+
+echo "Cloning Claude Launcher Web from GitHub..."
+git clone https://github.com/lucasaugustodev/claude-launcher-web.git /opt/claude-launcher-web
+chown -R claude:claude /opt/claude-launcher-web
+
 cd /opt/claude-launcher-web
-npm install --production 2>&1 | tail -3
-# Create systemd service
+sudo -u claude npm install --production 2>&1 | tail -5
+
+# Install Claude Code globally for the claude user
+sudo -u claude npm install -g @anthropic-ai/claude-code 2>&1 | tail -3
+
+# Create systemd service running as claude user
 cat > /etc/systemd/system/claude-launcher-web.service << EOSVC
 [Unit]
 Description=Claude Launcher Web
 After=network.target
 [Service]
 Type=simple
+User=claude
+Group=claude
 WorkingDirectory=/opt/claude-launcher-web
 ExecStart=/usr/bin/node server.js
 Restart=always
 RestartSec=5
 Environment=PORT=3001
+Environment=HOME=/home/claude
 [Install]
 WantedBy=multi-user.target
 EOSVC
@@ -393,11 +405,10 @@ systemctl start claude-launcher-web
 # Open firewall
 ufw allow 3001/tcp 2>/dev/null || firewall-cmd --permanent --add-port=3001/tcp 2>/dev/null && firewall-cmd --reload 2>/dev/null || iptables -I INPUT -p tcp --dport 3001 -j ACCEPT 2>/dev/null || true
 sleep 2
-echo "Claude Launcher Web installed and running on port 3001"
+echo "Claude Launcher Web installed and running on port 3001 (as user claude)"
 '`,
-      timeout: 300000,
-    });
-  }
+    timeout: 300000,
+  });
 
   const results = [];
   for (let i = 0; i < steps.length; i++) {

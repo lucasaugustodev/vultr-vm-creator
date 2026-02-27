@@ -145,15 +145,14 @@ app.post('/api/instances', async (req, res) => {
   const isWindows = vultr.isWindowsOS(osId, cachedOSForDetection);
   const taskId = crypto.randomUUID();
 
-  // Steps: create(1) + wait(1) + provision steps if installClaude
+  // Steps: create(1) + wait(1) + provision steps
   // Windows provision: connect(1) + rdp(1) + git(1) + node(1) + path(1) + claude(1) + [launcherWeb(1)] + shortcuts(1) + password(1) = 8-9
-  // Linux provision: connect(1) + git(1) + node(1) + claude(1) + [launcherWeb(1)] = 4-5
+  // Linux provision: connect(1) + git(1) + node(1) + claude(1) + launcherWeb(1) = 5
   const hasLauncherWeb = fs.existsSync(path.join(LAUNCHER_WEB_DIR, 'server.js'));
   let winSteps = 8; // base: connect + rdp + git + node + path + claude + shortcuts + password
   if (hasLauncherWeb && tunnelUrl) winSteps++;
-  let linuxSteps = 4; // base: connect + git + node + claude
-  if (hasLauncherWeb && tunnelUrl) linuxSteps++;
-  const provSteps = installClaude ? (isWindows ? winSteps : linuxSteps) : 0;
+  const linuxSteps = 5; // connect + git + node + claude + launcherWeb (always)
+  const provSteps = isWindows ? (installClaude ? winSteps : 0) : linuxSteps;
   const stepsPerVm = 2 + provSteps;
   const totalSteps = qty * stepsPerVm;
   createTask(taskId);
@@ -236,8 +235,8 @@ app.post('/api/instances', async (req, res) => {
           detail: `Ativa! IP: ${ready.ip}`,
         });
 
-        // Steps 3+: Remote provisioning
-        if (installClaude && ready.ip && ready.ip !== '0.0.0.0') {
+        // Steps 3+: Remote provisioning (always for Linux, on-demand for Windows)
+        if ((installClaude || !isWindows) && ready.ip && ready.ip !== '0.0.0.0') {
           stepNum++;
           const connectPassword = vultrPassword || adminPassword || 'VultrAdmin2026';
           const currentTunnel = detectTunnelUrl();
