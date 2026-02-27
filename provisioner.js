@@ -10,14 +10,21 @@ const { execFile } = require('child_process');
 function psRemoteExec(host, password, psCommand, timeoutMs = 300000) {
   return new Promise((resolve, reject) => {
     // Build a PS script that creates credential and runs Invoke-Command
+    // On Linux (pwsh), SkipRevocationCheck is not supported, and we use -Authentication Negotiate
+    const isLinux = process.platform !== 'win32';
+    const sessionOpts = isLinux
+      ? `$so = New-PSSessionOption -SkipCACheck -SkipCNCheck`
+      : `$so = New-PSSessionOption -SkipCACheck -SkipCNCheck -SkipRevocationCheck`;
+    const authParam = isLinux ? '-Authentication Negotiate' : '';
+
     const script = `
 $ErrorActionPreference = 'Continue'
 $pw = '${password.replace(/'/g, "''")}'
 $secpwd = ConvertTo-SecureString $pw -AsPlainText -Force
 $cred = New-Object System.Management.Automation.PSCredential('Administrator', $secpwd)
-$so = New-PSSessionOption -SkipCACheck -SkipCNCheck -SkipRevocationCheck
+${sessionOpts}
 try {
-  $session = New-PSSession -ComputerName ${host} -Credential $cred -SessionOption $so -ErrorAction Stop
+  $session = New-PSSession -ComputerName ${host} -Credential $cred -SessionOption $so ${authParam} -ErrorAction Stop
   $result = Invoke-Command -Session $session -ScriptBlock {
     ${psCommand}
   } -ErrorAction Stop 2>&1
@@ -34,7 +41,7 @@ try {
       reject(new Error(`PS Remote timeout (${timeoutMs/1000}s)`));
     }, timeoutMs);
 
-    const psExe = process.platform === 'win32' ? 'powershell.exe' : 'pwsh';
+    const psExe = isLinux ? 'pwsh' : 'powershell.exe';
     execFile(psExe, ['-NoProfile', '-NonInteractive', '-Command', script], {
       timeout: timeoutMs,
       maxBuffer: 10 * 1024 * 1024,
