@@ -5,9 +5,25 @@ let currentView = 'dashboard';
 let refreshTimer = null;
 let actionInProgress = new Set();
 let selectedInstances = new Set();
+let currentUser = null;
 
 // ─── Init ───
 async function init() {
+  const token = getToken();
+  if (!token) {
+    showLogin();
+    return;
+  }
+  try {
+    currentUser = await API.getMe();
+    await loadApp();
+  } catch {
+    clearToken();
+    showLogin();
+  }
+}
+
+async function loadApp() {
   try {
     options = await API.getOptions();
   } catch (err) {
@@ -15,17 +31,69 @@ async function init() {
   }
   renderNav();
   showDashboard();
+
+  // Admin: auto-claim unowned VMs on first login
+  if (currentUser && currentUser.role === 'admin') {
+    try {
+      const result = await API.claimUnowned();
+      if (result.claimed > 0) {
+        showToast(`${result.claimed} VM(s) existentes atribuidas ao admin`, 'success');
+      }
+    } catch {}
+  }
+}
+
+// ─── Login View ───
+function showLogin() {
+  currentView = 'login';
+  currentUser = null;
+  stopAutoRefresh();
+  const nav = document.getElementById('nav-actions');
+  nav.innerHTML = '';
+  const app = document.getElementById('app');
+  renderAuthForm(app, handleAuthSuccess);
+}
+
+async function handleAuthSuccess(user) {
+  currentUser = user;
+  await loadApp();
 }
 
 // ─── Navigation ───
 function renderNav() {
   const nav = document.getElementById('nav-actions');
   nav.innerHTML = '';
-  nav.appendChild(el('button', {
-    className: 'btn btn-primary',
-    textContent: '+ Nova VM',
-    onClick: showCreateView,
-  }));
+
+  if (currentUser) {
+    const userInfo = el('div', { style: 'display: flex; align-items: center; gap: 10px;' });
+
+    if (currentUser.role === 'admin') {
+      userInfo.appendChild(el('span', {
+        className: 'badge-admin',
+        textContent: 'ADMIN',
+      }));
+    }
+
+    userInfo.appendChild(el('span', {
+      className: 'user-email',
+      textContent: currentUser.email,
+    }));
+
+    userInfo.appendChild(el('button', {
+      className: 'btn btn-primary btn-sm',
+      textContent: '+ Nova VM',
+      onClick: showCreateView,
+    }));
+
+    userInfo.appendChild(el('button', {
+      className: 'btn btn-outline btn-sm',
+      textContent: 'Sair',
+      style: 'color: #fff; border-color: rgba(255,255,255,0.4);',
+      onClick: () => API.logout(),
+    }));
+
+    nav.appendChild(userInfo);
+  }
 }
 
 // ─── Dashboard View ───
@@ -55,6 +123,11 @@ async function showDashboard() {
   header.appendChild(headerActions);
   app.appendChild(header);
 
+  // Limits bar for non-admin users
+  if (options && options.limits) {
+    app.appendChild(renderLimitsBar(options.limits));
+  }
+
   const content = el('div', { id: 'instance-list' });
   content.appendChild(el('div', { className: 'loading-full' },
     el('div', { className: 'spinner', style: 'margin-right: 8px;' }),
@@ -73,7 +146,8 @@ async function refreshInstances() {
 
   try {
     instances = await API.listInstances();
-    renderInstanceGrid(instances, content, handleInstanceAction);
+    const isAdmin = currentUser && currentUser.role === 'admin';
+    renderInstanceGrid(instances, content, handleInstanceAction, isAdmin);
     const info = document.getElementById('refresh-info');
     if (info) info.textContent = `${instances.length} instancia(s) - atualizado ${new Date().toLocaleTimeString()}`;
   } catch (err) {
@@ -218,7 +292,7 @@ async function handleCreateSubmit(data) {
 }
 
 // ─── Expose for components ───
-window.app = { showDashboard };
+window.app = { showDashboard, showLogin };
 
 // ─── Start ───
 document.addEventListener('DOMContentLoaded', init);

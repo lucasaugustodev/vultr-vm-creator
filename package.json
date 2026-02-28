@@ -13,8 +13,10 @@
   "type": "commonjs",
   "dependencies": {
     "archiver": "^7.0.1",
+    "bcryptjs": "^3.0.3",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
     "ssh2": "^1.17.0",
     "winrm-client": "^0.0.11"
   }

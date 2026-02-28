@@ -1,5 +1,6 @@
 node_modules/
 .env
+data/
 cloudflare-tunnel.log
 *.log
 _fix*.js

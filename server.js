@@ -6,12 +6,69 @@ const fs = require('fs');
 const { spawn } = require('child_process');
 const vultr = require('./vultr-service');
 const { provision } = require('./provisioner');
+const auth = require('./auth');
+
+auth.ensureDataDir();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+
+// ─── Allowed OS (filtered) ───
+const ALLOWED_OS_NAMES = {
+  windows: ['Windows 2022 Standard', 'Windows 2019 Standard', 'Windows 2025 Standard'],
+  linux: ['Ubuntu 24.04 LTS x64', 'Ubuntu 22.04 LTS x64', 'Debian 12 x64 (bookworm)'],
+};
+const MAX_PLAN_COST = 60;
+
+// ─── Auth Middleware ───
+function requireAuth(req, res, next) {
+  const header = req.headers.authorization;
+  if (!header || !header.startsWith('Bearer ')) {
+    return res.status(401).json({ success: false, error: 'Token obrigatorio' });
+  }
+  try {
+    const payload = auth.verifyToken(header.slice(7));
+    req.user = payload;
+    next();
+  } catch {
+    return res.status(401).json({ success: false, error: 'Token invalido ou expirado' });
+  }
+}
+
+function requireAdmin(req, res, next) {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ success: false, error: 'Acesso restrito a administradores' });
+  }
+  next();
+}
+
+// ─── Auth Routes ───
+app.post('/api/auth/register', async (req, res) => {
+  try {
+    const user = await auth.registerUser(req.body.email, req.body.password);
+    res.json({ success: true, user });
+  } catch (err) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const result = await auth.loginUser(req.body.email, req.body.password);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    res.status(401).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/auth/me', requireAuth, (req, res) => {
+  const user = auth.getUserById(req.user.userId);
+  if (!user) return res.status(404).json({ success: false, error: 'Usuario nao encontrado' });
+  res.json({ success: true, user });
+});
 
 // ─── Tunnel URL detection ───
 let tunnelUrl = null;
@@ -92,7 +149,7 @@ let cachedOSForDetection = null;
 const LAUNCHER_WEB_DIR = path.normalize(path.join(__dirname, '..', 'claude-launcher-web'));
 
 // ─── GET /api/options ───
-app.get('/api/options', async (req, res) => {
+app.get('/api/options', requireAuth, async (req, res) => {
   try {
     const [osList, regions, plans] = await Promise.all([
       vultr.getOSList(),
@@ -100,13 +157,43 @@ app.get('/api/options', async (req, res) => {
       vultr.getPlans(),
     ]);
     cachedOSForDetection = osList;
+
+    // Filter OS to allowed list
+    const filteredWindows = osList.windows.filter(o =>
+      ALLOWED_OS_NAMES.windows.some(name => o.name.includes(name.replace(/ x64.*/, '')))
+    );
+    const filteredLinux = osList.linux.filter(o =>
+      ALLOWED_OS_NAMES.linux.some(name => o.name.includes(name.replace(/ x64.*/, '')))
+    );
+
+    // Filter plans by max cost
+    const filteredPlans = plans.filter(p => p.monthlyCost <= MAX_PLAN_COST);
+
+    // User limits
+    const isAdmin = req.user.role === 'admin';
+    const userInstanceIds = auth.getUserInstanceIds(req.user.userId);
+    let winCount = 0, linuxCount = 0;
+    if (!isAdmin && userInstanceIds.length > 0) {
+      try {
+        const allInstances = await vultr.listInstances();
+        for (const inst of allInstances) {
+          if (userInstanceIds.includes(inst.id)) {
+            if ((inst.os || '').toLowerCase().includes('windows')) winCount++;
+            else linuxCount++;
+          }
+        }
+      } catch {}
+    }
+
     res.json({
-      plans,
-      windowsOS: osList.windows,
-      linuxOS: osList.linux,
+      plans: filteredPlans,
+      windowsOS: filteredWindows,
+      linuxOS: filteredLinux,
       regions,
       launcherWebAvailable: true,
       tunnelAvailable: !!tunnelUrl,
+      limits: isAdmin ? null : { maxWindows: 3, maxLinux: 3, usedWindows: winCount, usedLinux: linuxCount },
+      isAdmin,
     });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -114,7 +201,7 @@ app.get('/api/options', async (req, res) => {
 });
 
 // ─── GET /api/account ───
-app.get('/api/account', async (req, res) => {
+app.get('/api/account', requireAuth, requireAdmin, async (req, res) => {
   try {
     const account = await vultr.getAccountInfo();
     res.json({ success: true, data: account });
@@ -124,17 +211,36 @@ app.get('/api/account', async (req, res) => {
 });
 
 // ─── GET /api/instances ───
-app.get('/api/instances', async (req, res) => {
+app.get('/api/instances', requireAuth, async (req, res) => {
   try {
     const instances = await vultr.listInstances();
-    res.json({ success: true, data: instances });
+    const isAdmin = req.user.role === 'admin';
+
+    if (isAdmin) {
+      // Admin sees all instances with owner info
+      const enriched = instances.map(inst => {
+        const ownerId = auth.getInstanceOwner(inst.id);
+        let ownerEmail = null;
+        if (ownerId) {
+          const owner = auth.getUserById(ownerId);
+          ownerEmail = owner ? owner.email : 'desconhecido';
+        }
+        return { ...inst, ownerEmail };
+      });
+      res.json({ success: true, data: enriched });
+    } else {
+      // Regular user sees only their instances
+      const userIds = auth.getUserInstanceIds(req.user.userId);
+      const filtered = instances.filter(inst => userIds.includes(inst.id));
+      res.json({ success: true, data: filtered });
+    }
   } catch (err) {
     res.status(err.statusCode || 500).json({ success: false, error: err.message });
   }
 });
 
 // ─── POST /api/instances (create single or batch) ───
-app.post('/api/instances', async (req, res) => {
+app.post('/api/instances', requireAuth, async (req, res) => {
   const { label, region, plan, osId, count, installClaude, adminPassword } = req.body;
 
   if (!label || !region || !plan || !osId) {
@@ -143,6 +249,28 @@ app.post('/api/instances', async (req, res) => {
 
   const qty = Math.min(Math.max(parseInt(count) || 1, 1), 20);
   const isWindows = vultr.isWindowsOS(osId, cachedOSForDetection);
+
+  // Enforce limits for non-admin users
+  if (req.user.role !== 'admin') {
+    const userIds = auth.getUserInstanceIds(req.user.userId);
+    let winCount = 0, linuxCount = 0;
+    if (userIds.length > 0) {
+      try {
+        const allInstances = await vultr.listInstances();
+        for (const inst of allInstances) {
+          if (userIds.includes(inst.id)) {
+            if ((inst.os || '').toLowerCase().includes('windows')) winCount++;
+            else linuxCount++;
+          }
+        }
+      } catch {}
+    }
+    const maxAllowed = isWindows ? (3 - winCount) : (3 - linuxCount);
+    if (qty > maxAllowed) {
+      const type = isWindows ? 'Windows' : 'Linux';
+      return res.status(400).json({ success: false, error: `Limite excedido. Voce pode criar mais ${Math.max(0, maxAllowed)} VM(s) ${type}.` });
+    }
+  }
   const taskId = crypto.randomUUID();
 
   // Steps: create(1) + wait(1) + provision steps
@@ -289,6 +417,8 @@ app.post('/api/instances', async (req, res) => {
 
         // Store password on result for display
         ready.defaultPassword = vultrPassword || ready.defaultPassword;
+        // Assign ownership
+        auth.assignInstance(ready.id, req.user.userId);
         results.push(ready);
       }
 
@@ -317,6 +447,11 @@ app.post('/api/instances', async (req, res) => {
 
 // ─── GET /api/tasks/:id/progress (SSE) ───
 app.get('/api/tasks/:id/progress', (req, res) => {
+  // Auth via query param (SSE can't send headers)
+  const token = req.query.token;
+  if (!token) return res.status(401).json({ success: false, error: 'Token obrigatorio' });
+  try { auth.verifyToken(token); } catch { return res.status(401).json({ success: false, error: 'Token invalido' }); }
+
   const task = tasks.get(req.params.id);
   if (!task) {
     return res.status(404).json({ success: false, error: 'Task not found' });
@@ -359,8 +494,20 @@ app.get('/api/tasks/:id/progress', (req, res) => {
   });
 });
 
+// ─── Ownership check helper ───
+function checkOwnership(req, res) {
+  if (req.user.role === 'admin') return true;
+  const owner = auth.getInstanceOwner(req.params.id);
+  if (owner !== req.user.userId) {
+    res.status(403).json({ success: false, error: 'Voce nao tem permissao para esta instancia' });
+    return false;
+  }
+  return true;
+}
+
 // ─── POST /api/instances/:id/start ───
-app.post('/api/instances/:id/start', async (req, res) => {
+app.post('/api/instances/:id/start', requireAuth, async (req, res) => {
+  if (!checkOwnership(req, res)) return;
   try {
     await vultr.startInstance(req.params.id);
     res.json({ success: true, message: 'Instancia iniciada' });
@@ -370,7 +517,8 @@ app.post('/api/instances/:id/start', async (req, res) => {
 });
 
 // ─── POST /api/instances/:id/stop ───
-app.post('/api/instances/:id/stop', async (req, res) => {
+app.post('/api/instances/:id/stop', requireAuth, async (req, res) => {
+  if (!checkOwnership(req, res)) return;
   try {
     await vultr.stopInstance(req.params.id);
     res.json({ success: true, message: 'Instancia parada' });
@@ -380,7 +528,8 @@ app.post('/api/instances/:id/stop', async (req, res) => {
 });
 
 // ─── POST /api/instances/:id/reboot ───
-app.post('/api/instances/:id/reboot', async (req, res) => {
+app.post('/api/instances/:id/reboot', requireAuth, async (req, res) => {
+  if (!checkOwnership(req, res)) return;
   try {
     await vultr.rebootInstance(req.params.id);
     res.json({ success: true, message: 'Instancia reiniciada' });
@@ -390,12 +539,14 @@ app.post('/api/instances/:id/reboot', async (req, res) => {
 });
 
 // ─── DELETE /api/instances/:id ───
-app.delete('/api/instances/:id', async (req, res) => {
+app.delete('/api/instances/:id', requireAuth, async (req, res) => {
+  if (!checkOwnership(req, res)) return;
   if (!req.body.confirm) {
     return res.status(400).json({ success: false, error: 'Confirmacao necessaria' });
   }
   try {
     await vultr.deleteInstance(req.params.id);
+    auth.removeInstance(req.params.id);
     res.json({ success: true, message: 'Instancia deletada' });
   } catch (err) {
     res.status(err.statusCode || 500).json({ success: false, error: err.message });
@@ -403,15 +554,27 @@ app.delete('/api/instances/:id', async (req, res) => {
 });
 
 // ─── DELETE /api/instances (batch delete) ───
-app.delete('/api/instances', async (req, res) => {
+app.delete('/api/instances', requireAuth, async (req, res) => {
   const { ids, confirm } = req.body;
   if (!confirm || !ids || !Array.isArray(ids)) {
     return res.status(400).json({ success: false, error: 'ids[] e confirm necessarios' });
+  }
+  // Check ownership for all ids
+  if (req.user.role !== 'admin') {
+    const userIds = auth.getUserInstanceIds(req.user.userId);
+    const unauthorized = ids.filter(id => !userIds.includes(id));
+    if (unauthorized.length > 0) {
+      return res.status(403).json({ success: false, error: 'Voce nao tem permissao para algumas instancias' });
+    }
   }
   try {
     const results = await Promise.allSettled(
       ids.map(id => vultr.deleteInstance(id))
     );
+    // Clean up ownership for successfully deleted
+    for (let i = 0; i < ids.length; i++) {
+      if (results[i].status === 'fulfilled') auth.removeInstance(ids[i]);
+    }
     const failed = results.filter(r => r.status === 'rejected').map(r => r.reason.message);
     res.json({
       success: failed.length === 0,
@@ -424,7 +587,13 @@ app.delete('/api/instances', async (req, res) => {
 });
 
 // ─── GET /api/instances/:id/rdp ───
-app.get('/api/instances/:id/rdp', async (req, res) => {
+app.get('/api/instances/:id/rdp', (req, res, next) => {
+  // RDP download is a direct link, support token via query param
+  if (!req.headers.authorization && req.query.token) {
+    req.headers.authorization = `Bearer ${req.query.token}`;
+  }
+  requireAuth(req, res, next);
+}, async (req, res) => {
   try {
     const instance = await vultr.getInstance(req.params.id);
     if (!instance.ip || instance.ip === '0.0.0.0') {
@@ -466,7 +635,7 @@ if (fs.existsSync(path.join(LAUNCHER_WEB_DIR, 'server.js'))) {
 }
 
 // ─── Launcher health check proxy ───
-app.get('/api/instances/:id/launcher-status', async (req, res) => {
+app.get('/api/instances/:id/launcher-status', requireAuth, async (req, res) => {
   try {
     const instance = await vultr.getInstance(req.params.id);
     if (!instance.ip || instance.ip === '0.0.0.0') {
@@ -489,6 +658,23 @@ app.get('/api/instances/:id/launcher-status', async (req, res) => {
     }
   } catch (err) {
     res.status(500).json({ online: false, error: err.message });
+  }
+});
+
+// ─── POST /api/admin/claim-unowned ───
+app.post('/api/admin/claim-unowned', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const instances = await vultr.listInstances();
+    let claimed = 0;
+    for (const inst of instances) {
+      if (!auth.getInstanceOwner(inst.id)) {
+        auth.assignInstance(inst.id, req.user.userId);
+        claimed++;
+      }
+    }
+    res.json({ success: true, claimed });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 

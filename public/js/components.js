@@ -42,6 +42,128 @@ function closeModal() {
   document.getElementById('modal-overlay').classList.add('hidden');
 }
 
+// ─── Auth Form ───
+function renderAuthForm(container, onSuccess) {
+  container.innerHTML = '';
+  const view = el('div', { className: 'auth-view' });
+  const card = el('div', { className: 'auth-card' });
+
+  card.appendChild(el('h2', { textContent: 'Vultr VM Manager', style: 'text-align: center; color: var(--vultr); margin-bottom: 4px;' }));
+  card.appendChild(el('p', { textContent: 'Faca login ou crie sua conta', style: 'text-align: center; color: var(--text-muted); font-size: 13px; margin-bottom: 24px;' }));
+
+  let isLogin = true;
+
+  const emailInput = el('input', { type: 'email', id: 'auth-email', placeholder: 'seu@email.com' });
+  const passwordInput = el('input', { type: 'password', id: 'auth-password', placeholder: 'Senha (min 6 caracteres)' });
+  const confirmInput = el('input', { type: 'password', id: 'auth-confirm', placeholder: 'Confirmar senha' });
+  const confirmGroup = el('div', { className: 'form-group', id: 'confirm-group', style: 'display: none;' },
+    el('label', { textContent: 'Confirmar Senha' }),
+    confirmInput,
+  );
+
+  const errorMsg = el('div', { id: 'auth-error', style: 'color: var(--red); font-size: 13px; margin-bottom: 12px; display: none;' });
+
+  const submitBtn = el('button', {
+    className: 'btn btn-action',
+    id: 'auth-submit',
+    textContent: 'Entrar',
+    style: 'width: 100%;',
+    onClick: async () => {
+      const email = emailInput.value.trim();
+      const password = passwordInput.value;
+      errorMsg.style.display = 'none';
+
+      if (!email || !password) {
+        errorMsg.textContent = 'Email e senha obrigatorios';
+        errorMsg.style.display = 'block';
+        return;
+      }
+
+      if (!isLogin) {
+        if (password !== confirmInput.value) {
+          errorMsg.textContent = 'Senhas nao conferem';
+          errorMsg.style.display = 'block';
+          return;
+        }
+        if (password.length < 6) {
+          errorMsg.textContent = 'Senha deve ter no minimo 6 caracteres';
+          errorMsg.style.display = 'block';
+          return;
+        }
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = isLogin ? 'Entrando...' : 'Cadastrando...';
+
+      try {
+        let user;
+        if (isLogin) {
+          user = await API.login(email, password);
+        } else {
+          await API.register(email, password);
+          user = await API.login(email, password);
+        }
+        onSuccess(user);
+      } catch (err) {
+        errorMsg.textContent = err.message;
+        errorMsg.style.display = 'block';
+      }
+
+      submitBtn.disabled = false;
+      submitBtn.textContent = isLogin ? 'Entrar' : 'Cadastrar';
+    },
+  });
+
+  const toggleLink = el('a', {
+    href: '#',
+    id: 'auth-toggle',
+    textContent: 'Nao tem conta? Cadastre-se',
+    style: 'display: block; text-align: center; margin-top: 16px; font-size: 13px; color: var(--vultr); cursor: pointer;',
+    onClick: (e) => {
+      e.preventDefault();
+      isLogin = !isLogin;
+      submitBtn.textContent = isLogin ? 'Entrar' : 'Cadastrar';
+      toggleLink.textContent = isLogin ? 'Nao tem conta? Cadastre-se' : 'Ja tem conta? Faca login';
+      confirmGroup.style.display = isLogin ? 'none' : 'block';
+      errorMsg.style.display = 'none';
+    },
+  });
+
+  card.appendChild(el('div', { className: 'form-group' }, el('label', { textContent: 'Email' }), emailInput));
+  card.appendChild(el('div', { className: 'form-group' }, el('label', { textContent: 'Senha' }), passwordInput));
+  card.appendChild(confirmGroup);
+  card.appendChild(errorMsg);
+  card.appendChild(submitBtn);
+  card.appendChild(toggleLink);
+
+  view.appendChild(card);
+  container.appendChild(view);
+
+  emailInput.focus();
+}
+
+// ─── Limits Bar ───
+function renderLimitsBar(limits) {
+  const bar = el('div', { className: 'limits-bar' });
+
+  const winUsed = limits.usedWindows || 0;
+  const linuxUsed = limits.usedLinux || 0;
+  const winMax = limits.maxWindows || 3;
+  const linuxMax = limits.maxLinux || 3;
+
+  bar.appendChild(el('span', { textContent: 'Limites: ', style: 'font-weight: 600; font-size: 13px;' }));
+  bar.appendChild(el('span', {
+    className: `limit-tag ${winUsed >= winMax ? 'limit-full' : ''}`,
+    textContent: `Windows: ${winUsed}/${winMax}`,
+  }));
+  bar.appendChild(el('span', {
+    className: `limit-tag ${linuxUsed >= linuxMax ? 'limit-full' : ''}`,
+    textContent: `Linux: ${linuxUsed}/${linuxMax}`,
+  }));
+
+  return bar;
+}
+
 // ─── Status Badge ───
 function statusBadge(status, powerStatus) {
   let cls = 'badge-unknown';
@@ -70,7 +192,7 @@ function isWindowsInstance(instance) {
 }
 
 // ─── Instance Card ───
-function renderInstanceCard(instance, onAction) {
+function renderInstanceCard(instance, onAction, showOwner) {
   const isRunning = instance.powerStatus === 'running';
   const isStopped = instance.powerStatus === 'stopped';
   const isWin = isWindowsInstance(instance);
@@ -89,7 +211,7 @@ function renderInstanceCard(instance, onAction) {
         },
       });
       // Check launcher status
-      fetch(`/api/instances/${instance.id}/launcher-status`)
+      authFetch(`/api/instances/${instance.id}/launcher-status`)
         .then(r => r.json())
         .then(data => {
           if (data.online) {
@@ -156,6 +278,22 @@ function renderInstanceCard(instance, onAction) {
     textContent: isWin ? 'WIN' : 'LNX',
   });
 
+  const infoSection = el('div', { className: 'vm-card-info' },
+    infoRow('IP', instance.ip && instance.ip !== '0.0.0.0' ? instance.ip : 'Aguardando...'),
+    infoRow('OS', instance.os || '-'),
+    infoRow('Plano', instance.plan || '-'),
+    infoRow('Regiao', instance.region || '-'),
+    infoRow('vCPU/RAM', `${instance.vcpuCount || '?'} vCPU / ${instance.ram ? (instance.ram >= 1024 ? (instance.ram / 1024) + ' GB' : instance.ram + ' MB') : '?'}`),
+    infoRow('Senha', instance.defaultPassword || '-'),
+    infoRow('ID', instance.id),
+  );
+
+  if (showOwner && instance.ownerEmail) {
+    infoSection.appendChild(infoRow('Dono', instance.ownerEmail));
+  } else if (showOwner && !instance.ownerEmail) {
+    infoSection.appendChild(infoRow('Dono', 'sem dono'));
+  }
+
   return el('div', { className: 'vm-card', dataset: { id: instance.id } },
     el('div', { className: 'vm-card-header' },
       el('div', { style: 'display: flex; align-items: center; gap: 8px;' },
@@ -164,15 +302,7 @@ function renderInstanceCard(instance, onAction) {
       ),
       statusBadge(instance.status, instance.powerStatus)
     ),
-    el('div', { className: 'vm-card-info' },
-      infoRow('IP', instance.ip && instance.ip !== '0.0.0.0' ? instance.ip : 'Aguardando...'),
-      infoRow('OS', instance.os || '-'),
-      infoRow('Plano', instance.plan || '-'),
-      infoRow('Regiao', instance.region || '-'),
-      infoRow('vCPU/RAM', `${instance.vcpuCount || '?'} vCPU / ${instance.ram ? (instance.ram >= 1024 ? (instance.ram / 1024) + ' GB' : instance.ram + ' MB') : '?'}`),
-      infoRow('Senha', instance.defaultPassword || '-'),
-      infoRow('ID', instance.id),
-    ),
+    infoSection,
     actions
   );
 }
@@ -196,7 +326,7 @@ function infoRow(label, value) {
 }
 
 // ─── Instance Grid ───
-function renderInstanceGrid(instances, container, onAction) {
+function renderInstanceGrid(instances, container, onAction, showOwner) {
   container.innerHTML = '';
 
   if (instances.length === 0) {
@@ -210,7 +340,7 @@ function renderInstanceGrid(instances, container, onAction) {
 
   const grid = el('div', { className: 'vm-grid' });
   for (const inst of instances) {
-    grid.appendChild(renderInstanceCard(inst, onAction));
+    grid.appendChild(renderInstanceCard(inst, onAction, showOwner));
   }
   container.appendChild(grid);
 }
@@ -250,9 +380,17 @@ function renderCreateForm(options, container, onSubmit, onCancel) {
   }), 'Prefixo do nome. Se criar varias, sera: nome-01, nome-02, ...'));
 
   // Quantity
-  form.appendChild(formGroup('Quantidade', el('input', {
+  const countInput = el('input', {
     type: 'number', id: 'f-count', value: '1', min: '1', max: '20',
-  }), 'Numero de VMs a criar (1-20)'));
+  });
+  const countHint = el('div', { className: 'hint', id: 'f-count-hint', textContent: 'Numero de VMs a criar (1-20)' });
+  const countGroup = el('div', { className: 'form-group' });
+  const countLabel = el('label');
+  countLabel.innerHTML = 'Quantidade <span class="required">*</span>';
+  countGroup.appendChild(countLabel);
+  countGroup.appendChild(countInput);
+  countGroup.appendChild(countHint);
+  form.appendChild(countGroup);
 
   // Region
   const regionSelect = el('select', { id: 'f-region' });
@@ -399,6 +537,21 @@ function renderCreateForm(options, container, onSubmit, onCancel) {
       bootstrapDesc.textContent = hasLauncherWeb
         ? 'Instalar Git + Node.js + Claude Code + Claude Web Launcher + definir senha (via WinRM)'
         : 'Instalar Git + Node.js + Claude Code + definir senha (via remoto apos boot)';
+    }
+
+    // Update count limits
+    const countHintEl = document.getElementById('f-count-hint');
+    const countInputEl = document.getElementById('f-count');
+    if (options.limits) {
+      const remaining = type === 'windows'
+        ? (options.limits.maxWindows - (options.limits.usedWindows || 0))
+        : (options.limits.maxLinux - (options.limits.usedLinux || 0));
+      const max = Math.max(0, remaining);
+      countInputEl.max = max;
+      if (parseInt(countInputEl.value) > max) countInputEl.value = max;
+      countHintEl.textContent = `Maximo: ${max} VM(s) ${type === 'windows' ? 'Windows' : 'Linux'} restantes`;
+      if (max === 0) countHintEl.style.color = 'var(--red)';
+      else countHintEl.style.color = '';
     }
 
     // Store current type
