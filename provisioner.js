@@ -245,7 +245,19 @@ async function provisionWindows(connInfo, { adminPassword, onStep }) {
     timeout: 300000,
   });
 
-  // Step 6: Install Claude Launcher Web (clone from GitHub - git already installed)
+  // Step 6: Install Cline CLI
+  steps.push({
+    label: 'Instalar Cline CLI',
+    command: `
+      $env:Path = 'C:\\Program Files\\nodejs;C:\\Program Files\\Git\\cmd;C:\\Program Files\\Git\\bin;' + [System.Environment]::GetEnvironmentVariable('Path','Machine')
+      Write-Output 'Installing Cline CLI...'
+      & 'C:\\Program Files\\nodejs\\npm.cmd' install -g cline 2>&1 | Select-Object -Last 5
+      Write-Output 'Cline CLI installed'
+    `,
+    timeout: 180000,
+  });
+
+  // Step 7: Install Claude Launcher Web (clone from GitHub - git already installed)
   steps.push({
     label: 'Instalar Claude Launcher Web',
     command: `
@@ -363,6 +375,11 @@ async function provisionLinux(conn, { adminPassword, onStep }) {
       label: 'Instalar Claude Code',
       command: `bash -c 'if ! command -v npm &>/dev/null; then echo "npm not found"; exit 1; fi; echo "Installing Claude Code..."; npm install -g @anthropic-ai/claude-code 2>&1 | tail -3; echo "Claude: $(claude --version 2>/dev/null || echo check PATH)"'`,
       timeout: 300000,
+    },
+    {
+      label: 'Instalar Cline CLI',
+      command: `bash -c 'echo "Installing Cline CLI..."; npm install -g cline 2>&1 | tail -3; echo "Cline: $(cline --version 2>/dev/null || echo check PATH)"'`,
+      timeout: 180000,
     },
   ];
 

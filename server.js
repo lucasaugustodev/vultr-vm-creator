@@ -146,10 +146,10 @@ app.post('/api/instances', async (req, res) => {
   const taskId = crypto.randomUUID();
 
   // Steps: create(1) + wait(1) + provision steps
-  // Windows provision: connect(1) + rdp(1) + git(1) + node(1) + path(1) + claude(1) + launcherWeb(1) + shortcuts(1) + password(1) = 9
-  // Linux provision: connect(1) + git(1) + node(1) + claude(1) + launcherWeb(1) = 5
-  const winSteps = 9; // connect + rdp + git + node + path + claude + launcherWeb + shortcuts + password
-  const linuxSteps = 5; // connect + git + node + claude + launcherWeb (always)
+  // Windows provision: connect(1) + rdp(1) + git(1) + node(1) + path(1) + claude(1) + cline(1) + launcherWeb(1) + shortcuts(1) + password(1) = 10
+  // Linux provision: connect(1) + git(1) + node(1) + claude(1) + cline(1) + launcherWeb(1) = 6
+  const winSteps = 10; // connect + rdp + git + node + path + claude + cline + launcherWeb + shortcuts + password
+  const linuxSteps = 6; // connect + git + node + claude + cline + launcherWeb (always)
   const provSteps = isWindows ? (installClaude ? winSteps : 0) : linuxSteps;
   const stepsPerVm = 2 + provSteps;
   const totalSteps = qty * stepsPerVm;
