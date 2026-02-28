@@ -324,6 +324,9 @@ app.post('/api/instances', requireAuth, async (req, res) => {
         const vultrPassword = instance.default_password;
         console.log(`[Create] ${instanceLabel}: ID=${instance.id}, password=${vultrPassword ? 'captured' : 'NOT available'}`);
 
+        // Assign ownership immediately (before provisioning, so a server restart doesn't lose it)
+        auth.assignInstance(instance.id, req.user.userId);
+
         // Cleanup startup script (no longer needed after instance creation)
         if (scriptId) {
           vultr.deleteStartupScript(scriptId).catch(() => {});
@@ -417,8 +420,6 @@ app.post('/api/instances', requireAuth, async (req, res) => {
 
         // Store password on result for display
         ready.defaultPassword = vultrPassword || ready.defaultPassword;
-        // Assign ownership
-        auth.assignInstance(ready.id, req.user.userId);
         results.push(ready);
       }
 
