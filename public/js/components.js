@@ -144,7 +144,7 @@ function renderAuthForm(container, onSuccess) {
 
 // ─── Limits Bar ───
 function renderLimitsBar(limits) {
-  const bar = el('div', { className: 'limits-bar' });
+  const bar = el('div', { className: 'limits-bar', id: 'limits-bar' });
 
   const winUsed = limits.usedWindows || 0;
   const linuxUsed = limits.usedLinux || 0;

@@ -145,6 +145,15 @@ async function refreshInstances() {
   if (!content) return;
 
   try {
+    // Refresh options to update limits
+    try {
+      options = await API.getOptions();
+      const limitsContainer = document.getElementById('limits-bar');
+      if (limitsContainer && options && options.limits) {
+        limitsContainer.replaceWith(renderLimitsBar(options.limits));
+      }
+    } catch {}
+
     instances = await API.listInstances();
     const isAdmin = currentUser && currentUser.role === 'admin';
     renderInstanceGrid(instances, content, handleInstanceAction, isAdmin);

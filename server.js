@@ -278,7 +278,7 @@ app.post('/api/instances', requireAuth, async (req, res) => {
   // Linux provision: connect(1) + git(1) + node(1) + claude(1) + cline(1) + launcherWeb(1) = 6
   const winSteps = 10; // connect + rdp + git + node + path + claude + cline + launcherWeb + shortcuts + password
   const linuxSteps = 6; // connect + git + node + claude + cline + launcherWeb (always)
-  const provSteps = isWindows ? (installClaude ? winSteps : 0) : linuxSteps;
+  const provSteps = installClaude ? (isWindows ? winSteps : linuxSteps) : 0;
   const stepsPerVm = 2 + provSteps;
   const totalSteps = qty * stepsPerVm;
   createTask(taskId);
@@ -364,8 +364,8 @@ app.post('/api/instances', requireAuth, async (req, res) => {
           detail: `Ativa! IP: ${ready.ip}`,
         });
 
-        // Steps 3+: Remote provisioning (always for Linux, on-demand for Windows)
-        if ((installClaude || !isWindows) && ready.ip && ready.ip !== '0.0.0.0') {
+        // Steps 3+: Remote provisioning (when installClaude is checked)
+        if (installClaude && ready.ip && ready.ip !== '0.0.0.0') {
           stepNum++;
           const connectPassword = vultrPassword || adminPassword || 'VultrAdmin2026';
 
