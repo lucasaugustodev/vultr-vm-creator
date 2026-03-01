@@ -10,10 +10,24 @@ const auth = require('./auth');
 
 auth.ensureDataDir();
 
+// Prevent crashes from unhandled errors during provisioning
+process.on('uncaughtException', (err) => {
+  console.error('[UNCAUGHT]', err.message);
+});
+process.on('unhandledRejection', (err) => {
+  console.error('[UNHANDLED]', err && err.message ? err.message : err);
+});
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
+app.use((err, req, res, next) => {
+  if (err.type === 'entity.parse.failed') {
+    return res.status(400).json({ success: false, error: 'JSON invalido' });
+  }
+  next(err);
+});
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ─── Allowed OS (filtered) ───
