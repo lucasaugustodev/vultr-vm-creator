@@ -283,6 +283,7 @@ async function handleCreateSubmit(data) {
       onError(err) {
         tracker.stopTimer();
         showToast(`Erro na criacao: ${err.message}`, 'error');
+        setTimeout(() => showCreateView(), 2000);
       },
     });
   } catch (err) {

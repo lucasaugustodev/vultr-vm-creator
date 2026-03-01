@@ -166,8 +166,8 @@ app.get('/api/options', requireAuth, async (req, res) => {
       ALLOWED_OS_NAMES.linux.some(name => o.name.includes(name.replace(/ x64.*/, '')))
     );
 
-    // Filter plans by max cost
-    const filteredPlans = plans.filter(p => p.monthlyCost <= MAX_PLAN_COST);
+    // Filter plans by max cost and exclude IPv6-only (not available in all regions)
+    const filteredPlans = plans.filter(p => p.monthlyCost <= MAX_PLAN_COST && !p.id.includes('-v6'));
 
     // User limits
     const isAdmin = req.user.role === 'admin';

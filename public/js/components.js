@@ -414,11 +414,21 @@ function renderCreateForm(options, container, onSubmit, onCancel) {
   const osSelect = el('select', { id: 'f-os' });
   form.appendChild(formGroup('Sistema Operacional', osSelect));
 
-  // Plan
+  // Plan (filtered by selected region)
   const planSelect = el('select', { id: 'f-plan' });
-  for (const p of options.plans) {
-    planSelect.appendChild(el('option', { value: p.id, textContent: `${p.id} - ${p.desc}` }));
+  function updatePlansForRegion() {
+    const regionId = regionSelect.value;
+    planSelect.innerHTML = '';
+    const available = options.plans.filter(p => !p.locations || p.locations.includes(regionId));
+    for (const p of available) {
+      planSelect.appendChild(el('option', { value: p.id, textContent: `${p.id} - ${p.desc}` }));
+    }
+    if (available.length === 0) {
+      planSelect.appendChild(el('option', { value: '', textContent: 'Nenhum plano disponivel nesta regiao' }));
+    }
   }
+  regionSelect.addEventListener('change', updatePlansForRegion);
+  updatePlansForRegion();
   form.appendChild(formGroup('Plano', planSelect));
 
   // Bootstrap section
