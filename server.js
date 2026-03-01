@@ -230,6 +230,12 @@ app.get('/api/instances', requireAuth, async (req, res) => {
     const instances = await vultr.listInstances();
     const isAdmin = req.user.role === 'admin';
 
+    // Inject saved password (Vultr clears default_password after a while)
+    for (const inst of instances) {
+      const savedPw = auth.getInstancePassword(inst.id);
+      if (savedPw && !inst.defaultPassword) inst.defaultPassword = savedPw;
+    }
+
     if (isAdmin) {
       // Admin sees all instances with owner info
       const enriched = instances.map(inst => {
@@ -338,8 +344,8 @@ app.post('/api/instances', requireAuth, async (req, res) => {
         const vultrPassword = instance.default_password;
         console.log(`[Create] ${instanceLabel}: ID=${instance.id}, password=${vultrPassword ? 'captured' : 'NOT available'}`);
 
-        // Assign ownership immediately (before provisioning, so a server restart doesn't lose it)
-        auth.assignInstance(instance.id, req.user.userId);
+        // Assign ownership + save password immediately (before provisioning, so a server restart doesn't lose it)
+        auth.assignInstance(instance.id, req.user.userId, vultrPassword);
 
         // Cleanup startup script (no longer needed after instance creation)
         if (scriptId) {

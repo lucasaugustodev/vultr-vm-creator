@@ -117,9 +117,10 @@ function getUserById(userId) {
 
 // ─── Instance Ownership ───
 
-function assignInstance(instanceId, userId) {
+function assignInstance(instanceId, userId, password) {
   const mapping = loadInstances();
-  mapping[instanceId] = userId;
+  // Support old format (string userId) and new format (object)
+  mapping[instanceId] = { userId, password: password || null };
   saveInstances(mapping);
 }
 
@@ -129,14 +130,32 @@ function removeInstance(instanceId) {
   saveInstances(mapping);
 }
 
-function getInstanceOwner(instanceId) {
+function _getEntry(instanceId) {
   const mapping = loadInstances();
-  return mapping[instanceId] || null;
+  const entry = mapping[instanceId];
+  if (!entry) return null;
+  // Backward compat: old format was just a userId string
+  if (typeof entry === 'string') return { userId: entry, password: null };
+  return entry;
+}
+
+function getInstanceOwner(instanceId) {
+  const entry = _getEntry(instanceId);
+  return entry ? entry.userId : null;
+}
+
+function getInstancePassword(instanceId) {
+  const entry = _getEntry(instanceId);
+  return entry ? entry.password : null;
 }
 
 function getUserInstanceIds(userId) {
   const mapping = loadInstances();
-  return Object.keys(mapping).filter(id => mapping[id] === userId);
+  return Object.keys(mapping).filter(id => {
+    const entry = mapping[id];
+    if (typeof entry === 'string') return entry === userId;
+    return entry && entry.userId === userId;
+  });
 }
 
 module.exports = {
@@ -148,5 +167,6 @@ module.exports = {
   assignInstance,
   removeInstance,
   getInstanceOwner,
+  getInstancePassword,
   getUserInstanceIds,
 };
