@@ -1,3 +1,22 @@
+// ─── Clipboard Helper (HTTP fallback) ───
+function copyText(text) {
+  if (navigator.clipboard && copyText) {
+    copyText(text).catch(() => copyFallback(text));
+  } else {
+    copyFallback(text);
+  }
+}
+function copyFallback(text) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  document.execCommand('copy');
+  document.body.removeChild(ta);
+}
+
 // ─── Utility ───
 function el(tag, attrs, ...children) {
   const e = document.createElement(tag);
@@ -241,7 +260,7 @@ function renderInstanceCard(instance, onAction, showOwner) {
         textContent: 'Copiar SSH',
         onClick: () => {
           const cmd = `ssh root@${instance.ip}`;
-          navigator.clipboard.writeText(cmd);
+          copyText(cmd);
           showToast('Comando SSH copiado: ' + cmd, 'success');
         },
       }));
@@ -317,7 +336,7 @@ function infoRow(label, value) {
     row.style.cursor = 'pointer';
     row.title = 'Clique para copiar';
     row.addEventListener('click', () => {
-      navigator.clipboard.writeText(value);
+      copyText(value);
       showToast(`${label} copiado!`, 'success');
     });
   }
@@ -736,7 +755,7 @@ function renderSuccessView(container, result) {
         row.style.cursor = 'pointer';
         row.title = 'Clique para copiar';
         row.addEventListener('click', () => {
-          navigator.clipboard.writeText(value);
+          copyText(value);
           showToast(`${label} copiado!`, 'success');
         });
       }
@@ -789,7 +808,7 @@ function renderSuccessView(container, result) {
         className: 'btn btn-action btn-sm',
         textContent: 'Copiar SSH',
         onClick: () => {
-          navigator.clipboard.writeText(`ssh root@${inst.ip}`);
+          copyText(`ssh root@${inst.ip}`);
           showToast('SSH copiado!', 'success');
         },
       }));
@@ -797,12 +816,12 @@ function renderSuccessView(container, result) {
     cardActions.appendChild(el('button', {
       className: 'btn btn-outline btn-sm',
       textContent: 'Copiar Senha',
-      onClick: () => { navigator.clipboard.writeText(inst.defaultPassword); showToast('Senha copiada!', 'success'); },
+      onClick: () => { copyText(inst.defaultPassword); showToast('Senha copiada!', 'success'); },
     }));
     cardActions.appendChild(el('button', {
       className: 'btn btn-outline btn-sm',
       textContent: 'Copiar IP',
-      onClick: () => { navigator.clipboard.writeText(inst.ip); showToast('IP copiado!', 'success'); },
+      onClick: () => { copyText(inst.ip); showToast('IP copiado!', 'success'); },
     }));
     details.appendChild(cardActions);
 
