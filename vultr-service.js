@@ -307,7 +307,7 @@ log "=== Bootstrap Complete ==="
 }
 
 // ─── Create Instance ───
-async function createInstance({ label, region, plan, osId, scriptId, hostname, tag }) {
+async function createInstance({ label, region, plan, osId, scriptId, userData, hostname, tag }) {
   const body = {
     region,
     plan,
@@ -321,6 +321,10 @@ async function createInstance({ label, region, plan, osId, scriptId, hostname, t
 
   if (scriptId) {
     body.script_id = scriptId;
+  }
+
+  if (userData) {
+    body.user_data = Buffer.from(userData).toString("base64");
   }
 
   const data = await vultrFetch('/instances', {

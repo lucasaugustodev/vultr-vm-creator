@@ -320,16 +320,10 @@ app.post('/api/instances', requireAuth, async (req, res) => {
           detail: `Criando instancia ${i + 1}/${qty}...`,
         });
 
-        // For Windows: create a startup script to enable WinRM remote access
-        let scriptId = null;
+        // For Windows: pass WinRM enable script as user_data (more reliable than script_id)
+        let winrmUserData = null;
         if (isWindows) {
-          try {
-            const script = vultr.buildWindowsRemoteEnableScript();
-            const ss = await vultr.createStartupScript(`winrm-${instanceLabel}`, script);
-            scriptId = ss.id;
-          } catch (ssErr) {
-            console.error(`[Script] Failed to create startup script:`, ssErr.message);
-          }
+          winrmUserData = vultr.buildWindowsRemoteEnableScript();
         }
 
         const instance = await vultr.createInstance({
@@ -337,7 +331,7 @@ app.post('/api/instances', requireAuth, async (req, res) => {
           osId: parseInt(osId),
           hostname: instanceLabel,
           tag: 'vultr-vm-creator',
-          scriptId,
+          userData: winrmUserData,
         });
 
         // IMPORTANT: Save the Vultr-generated password from the creation response
@@ -347,10 +341,7 @@ app.post('/api/instances', requireAuth, async (req, res) => {
         // Assign ownership + save password immediately (before provisioning, so a server restart doesn't lose it)
         auth.assignInstance(instance.id, req.user.userId, vultrPassword);
 
-        // Cleanup startup script (no longer needed after instance creation)
-        if (scriptId) {
-          vultr.deleteStartupScript(scriptId).catch(() => {});
-        }
+        
 
         emitToTask(taskId, 'progress', {
           step: stepNum, total: totalSteps,

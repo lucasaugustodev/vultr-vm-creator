@@ -274,10 +274,15 @@ async function provisionWindows(connInfo, { adminPassword, onStep }) {
       Set-Location $launcherDir
       & 'C:\\Program Files\\nodejs\\npm.cmd' install --production 2>&1 | Select-Object -Last 3
 
+      # Create start.bat wrapper (sets PORT=3001 env var)
+      $startBat = Join-Path $launcherDir 'start.bat'
+      $nl = [Environment]::NewLine
+      $batContent = '@echo off' + $nl + 'set PORT=3001' + $nl + [char]34 + 'C:\Program Files\nodejs\node.exe' + [char]34 + ' server.js'
+      [System.IO.File]::WriteAllText($startBat, $batContent)
+
       # Create scheduled task to auto-start on boot
       $taskName = 'ClaudeLauncherWeb'
-      $nodeExe = 'C:\\Program Files\\nodejs\\node.exe'
-      $action = New-ScheduledTaskAction -Execute $nodeExe -Argument 'server.js' -WorkingDirectory $launcherDir
+      $action = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument ('/c "' + $startBat + '"') -WorkingDirectory $launcherDir
       $trigger = New-ScheduledTaskTrigger -AtStartup
       $settings = New-ScheduledTaskSettingsSet -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -StartWhenAvailable -DontStopIfGoingOnBatteries
       $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
